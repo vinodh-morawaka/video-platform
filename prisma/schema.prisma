@@ -1,0 +1,202 @@
+// Prisma schema for the video platform (VOD-first MVP)
+// Docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ---------- Auth / Identity ----------
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  emailVerified DateTime?
+  username      String    @unique
+  displayName   String?
+  avatarUrl     String?
+  bio           String?
+  passwordHash  String? // null if using OAuth-only sign-in
+  role          UserRole  @default(VIEWER)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  channel       Channel?
+  videos        Video[]
+  comments      Comment[]
+  likes         Like[]
+  follows       Follow[]       @relation("FollowerToFollows")
+  followedBy    Follow[]       @relation("FollowingToFollowers")
+  reports       Report[]       @relation("ReportsFiled")
+
+  @@index([username])
+}
+
+enum UserRole {
+  VIEWER
+  CREATOR
+  MODERATOR
+  ADMIN
+}
+
+// A Channel is a creator's public-facing presence (1:1 with User for MVP,
+// kept separate so multi-user/team channels are possible later).
+model Channel {
+  id          String   @id @default(cuid())
+  ownerId     String   @unique
+  owner       User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  name        String
+  slug        String   @unique
+  description String?
+  bannerUrl   String?
+  createdAt   DateTime @default(now())
+
+  videos      Video[]
+  followers   Follow[]
+
+  @@index([slug])
+}
+
+model Follow {
+  id          String   @id @default(cuid())
+  followerId  String
+  follower    User     @relation("FollowerToFollows", fields: [followerId], references: [id], onDelete: Cascade)
+  channelId   String
+  channel     Channel  @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  // Denormalized so we can also express "user follows user" if channels
+  // ever become multi-owner; keep both for query flexibility.
+  followingUserId String?
+  followingUser   User?  @relation("FollowingToFollowers", fields: [followingUserId], references: [id])
+  createdAt   DateTime @default(now())
+
+  @@unique([followerId, channelId])
+}
+
+// ---------- Video (VOD first; live fields reserved for later) ----------
+
+model Video {
+  id            String       @id @default(cuid())
+  title         String
+  description   String?
+  channelId     String
+  channel       Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  uploaderId    String
+  uploader      User         @relation(fields: [uploaderId], references: [id])
+
+  // Managed video provider (Mux / Cloudflare Stream) references —
+  // we never self-host encoding/storage.
+  provider      VideoProvider @default(MUX)
+  providerAssetId String?     @unique
+  playbackId      String?     // public playback id from the provider
+  thumbnailUrl    String?
+  durationSeconds Int?
+
+  status        VideoStatus  @default(PROCESSING)
+  visibility    Visibility   @default(PUBLIC)
+
+  viewCount     Int          @default(0)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  publishedAt   DateTime?
+
+  tags          Tag[]        @relation("VideoTags")
+  comments      Comment[]
+  likes         Like[]
+  reports       Report[]     @relation("ReportsOnVideo")
+
+  @@index([channelId])
+  @@index([status, visibility])
+  @@index([publishedAt])
+}
+
+enum VideoProvider {
+  MUX
+  CLOUDFLARE_STREAM
+}
+
+enum VideoStatus {
+  PROCESSING
+  READY
+  FAILED
+  REMOVED
+}
+
+enum Visibility {
+  PUBLIC
+  UNLISTED
+  PRIVATE
+}
+
+model Tag {
+  id     String  @id @default(cuid())
+  name   String  @unique
+  videos Video[] @relation("VideoTags")
+}
+
+// ---------- Engagement / Moderation ----------
+
+model Comment {
+  id        String    @id @default(cuid())
+  videoId   String
+  video     Video     @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    User      @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body      String
+  parentId  String?
+  parent    Comment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies   Comment[] @relation("CommentReplies")
+  isHidden  Boolean   @default(false) // soft-moderation instead of hard delete
+  createdAt DateTime  @default(now())
+
+  @@index([videoId])
+}
+
+model Like {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  videoId   String
+  video     Video    @relation(fields: [videoId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, videoId])
+}
+
+// Reports feed the moderation queue — built in from day one per the
+// "poor moderation on YouTube/Twitch" pain point this product targets.
+model Report {
+  id          String       @id @default(cuid())
+  reporterId  String
+  reporter    User         @relation("ReportsFiled", fields: [reporterId], references: [id], onDelete: Cascade)
+  videoId     String?
+  video       Video?       @relation("ReportsOnVideo", fields: [videoId], references: [id], onDelete: Cascade)
+  commentId   String?
+  reason      ReportReason
+  details     String?
+  status      ReportStatus @default(OPEN)
+  createdAt   DateTime     @default(now())
+  resolvedAt  DateTime?
+
+  @@index([status])
+}
+
+enum ReportReason {
+  SPAM
+  HARASSMENT
+  HATE_SPEECH
+  COPYRIGHT
+  SEXUAL_CONTENT
+  VIOLENCE
+  OTHER
+}
+
+enum ReportStatus {
+  OPEN
+  IN_REVIEW
+  ACTIONED
+  DISMISSED
+}

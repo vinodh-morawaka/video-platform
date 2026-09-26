@@ -1,0 +1,30 @@
+@import "tailwindcss";
+
+:root {
+  --ink-950: #15120d;
+  --ink-900: #211c14;
+  --ink-800: #33291c;
+  --paper-100: #f3ecdd;
+  --marquee-500: #e8a33d;
+  --marquee-600: #cf8a29;
+  --signal-500: #dd5b3e;
+  --moss-500: #74936f;
+}
+
+@theme inline {
+  --color-ink-950: var(--ink-950);
+  --color-ink-900: var(--ink-900);
+  --color-ink-800: var(--ink-800);
+  --color-paper-100: var(--paper-100);
+  --color-marquee-500: var(--marquee-500);
+  --color-marquee-600: var(--marquee-600);
+  --color-signal-500: var(--signal-500);
+  --color-moss-500: var(--moss-500);
+  --font-sans: var(--font-public-sans);
+  --font-display: var(--font-big-shoulders);
+}
+
+body {
+  background: var(--ink-950);
+  color: var(--paper-100);
+}
