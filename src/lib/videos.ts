@@ -28,7 +28,11 @@ export async function getVideoById(id: string) {
         orderBy: { createdAt: "desc" },
         include: {
           author: { select: { username: true, avatarUrl: true } },
-          replies: { include: { author: { select: { username: true, avatarUrl: true } } } },
+          replies: {
+            where: { isHidden: false },
+            orderBy: { createdAt: "asc" },
+            include: { author: { select: { username: true, avatarUrl: true } } },
+          },
         },
       },
       _count: { select: { likes: true } },

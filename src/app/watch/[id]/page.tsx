@@ -2,10 +2,12 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getVideoById } from "@/lib/videos";
 import VideoPlayer from "@/components/VideoPlayer";
+import CommentsSection from "@/components/CommentsSection";
+import { auth } from "@/lib/auth";
 
 export default async function WatchPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const video = await getVideoById(id);
+  const [video, session] = await Promise.all([getVideoById(id), auth()]);
   if (!video) notFound();
 
   return (
@@ -36,22 +38,7 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
         ) : null}
       </div>
 
-      <div className="flex flex-col gap-4 border-t border-ink-800 pt-4">
-        <h2 className="text-sm font-medium text-paper-100/70">
-          {video.comments.length} comments
-        </h2>
-        {video.comments.map((c) => (
-          <div key={c.id} className="flex flex-col gap-1">
-            <div className="flex items-baseline gap-2">
-              <span className="text-sm font-medium text-paper-100">{c.author.username}</span>
-              <span className="text-xs text-paper-100/40">
-                {new Date(c.createdAt).toLocaleDateString()}
-              </span>
-            </div>
-            <p className="text-sm text-paper-100/70">{c.body}</p>
-          </div>
-        ))}
-      </div>
+      <CommentsSection videoId={video.id} comments={video.comments} loggedIn={Boolean(session?.user)} />
     </div>
   );
 }

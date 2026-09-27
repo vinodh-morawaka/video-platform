@@ -6,8 +6,15 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  // DATABASE_URL should be the pooled (PgBouncer) connection string —
+  // required for Neon/Vercel Postgres since serverless functions and a
+  // hot-reloading dev server both open many short-lived connections.
+  url       = env("DATABASE_URL")
+  // DIRECT_URL is the unpooled connection — migrations need a direct
+  // connection because PgBouncer's transaction pooling mode doesn't
+  // support the session-level features `prisma migrate` relies on.
+  directUrl = env("DIRECT_URL")
 }
 
 // ---------- Auth / Identity ----------
@@ -151,6 +158,7 @@ model Comment {
   replies   Comment[] @relation("CommentReplies")
   isHidden  Boolean   @default(false) // soft-moderation instead of hard delete
   createdAt DateTime  @default(now())
+  reports   Report[]  @relation("ReportsOnComment")
 
   @@index([videoId])
 }
@@ -175,6 +183,7 @@ model Report {
   videoId     String?
   video       Video?       @relation("ReportsOnVideo", fields: [videoId], references: [id], onDelete: Cascade)
   commentId   String?
+  comment     Comment?     @relation("ReportsOnComment", fields: [commentId], references: [id], onDelete: Cascade)
   reason      ReportReason
   details     String?
   status      ReportStatus @default(OPEN)
