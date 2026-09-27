@@ -1,8 +1,9 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
-import { getVideoById } from "@/lib/videos";
+import { getVideoById, getUsersOpenReportsForVideo } from "@/lib/videos";
 import VideoPlayer from "@/components/VideoPlayer";
 import CommentsSection from "@/components/CommentsSection";
+import ReportButton from "@/components/ReportButton";
 import { auth } from "@/lib/auth";
 
 export default async function WatchPage({ params }: { params: Promise<{ id: string }> }) {
@@ -10,10 +11,19 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
   const [video, session] = await Promise.all([getVideoById(id), auth()]);
   if (!video) notFound();
 
+  const commentIds = video.comments.flatMap((c) => [c.id, ...c.replies.map((r) => r.id)]);
+  const alreadyReported = session?.user
+    ? await getUsersOpenReportsForVideo(session.user.id, video.id, commentIds)
+    : null;
+
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6">
       <div className="overflow-hidden rounded-xl bg-ink-900">
-        {video.playbackId ? (
+        {video.status === "REMOVED" ? (
+          <div className="flex aspect-video items-center justify-center text-paper-100/50">
+            This video was removed for violating community guidelines.
+          </div>
+        ) : video.playbackId ? (
           <VideoPlayer playbackId={video.playbackId} videoId={video.id} />
         ) : (
           <div className="flex aspect-video items-center justify-center text-paper-100/50">
@@ -32,13 +42,24 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
           <span>{video.viewCount.toLocaleString()} views</span>
           <span>&middot;</span>
           <span>{video._count.likes.toLocaleString()} likes</span>
+          {session?.user ? (
+            <>
+              <span>&middot;</span>
+              <ReportButton videoId={video.id} alreadyReported={alreadyReported?.video} />
+            </>
+          ) : null}
         </div>
         {video.description ? (
           <p className="mt-2 whitespace-pre-wrap text-sm text-paper-100/70">{video.description}</p>
         ) : null}
       </div>
 
-      <CommentsSection videoId={video.id} comments={video.comments} loggedIn={Boolean(session?.user)} />
+      <CommentsSection
+        videoId={video.id}
+        comments={video.comments}
+        loggedIn={Boolean(session?.user)}
+        reportedCommentIds={alreadyReported ? Array.from(alreadyReported.commentIds) : []}
+      />
     </div>
   );
 }

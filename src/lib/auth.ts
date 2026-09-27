@@ -35,6 +35,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.displayName ?? user.username,
           username: user.username,
+          role: user.role,
         };
       },
     }),
@@ -45,18 +46,25 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // `config.matcher`, but keep this scoped explicitly in case that
     // matcher list grows later.
     authorized({ auth, request }) {
+      if (request.nextUrl.pathname.startsWith("/admin")) {
+        const role = auth?.user?.role;
+        return role === "ADMIN" || role === "MODERATOR";
+      }
       if (request.nextUrl.pathname.startsWith("/upload")) {
         return Boolean(auth?.user);
       }
       return true;
     },
-    // Carry the user id and username onto the JWT, then onto the session
-    // object, so server components/route handlers can read them without
-    // an extra DB round trip just to identify who's logged in.
+    // Carry the user id, username and role onto the JWT, then onto the
+    // session object, so server components/route handlers can read them
+    // without an extra DB round trip. NOTE: with JWT sessions, `user` is
+    // only passed in on sign-in — if you promote someone's role in the
+    // database later, they need to log out and back in to see it reflected.
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
         token.username = (user as { username?: string }).username;
+        token.role = (user as { role?: string }).role;
       }
       return token;
     },
@@ -64,6 +72,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (session.user) {
         session.user.id = token.id as string;
         session.user.username = token.username as string;
+        session.user.role = token.role as string;
       }
       return session;
     },

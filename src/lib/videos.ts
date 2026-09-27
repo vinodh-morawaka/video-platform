@@ -56,3 +56,23 @@ export async function getChannelBySlug(slug: string) {
 export async function incrementViewCount(id: string) {
   return prisma.video.update({ where: { id }, data: { viewCount: { increment: 1 } } });
 }
+
+// Returns which of this video's own reportable items (the video itself,
+// and any of its comments) this specific user already has an OPEN report
+// on — so the UI can show "Already reported" instead of a fresh Report
+// button after a page refresh. One query for the whole page.
+export async function getUsersOpenReportsForVideo(userId: string, videoId: string, commentIds: string[]) {
+  const reports = await prisma.report.findMany({
+    where: {
+      reporterId: userId,
+      status: "OPEN",
+      OR: [{ videoId }, { commentId: { in: commentIds } }],
+    },
+    select: { videoId: true, commentId: true },
+  });
+
+  return {
+    video: reports.some((r) => r.videoId === videoId),
+    commentIds: new Set<string>(reports.filter((r) => r.commentId).map((r) => r.commentId as string)),
+  };
+}

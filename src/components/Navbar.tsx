@@ -1,10 +1,11 @@
 import Link from "next/link";
-import { Upload, Home } from "lucide-react";
+import { Upload, Home, Shield } from "lucide-react";
 import { auth } from "@/lib/auth";
 import SignOutButton from "@/components/SignOutButton";
 
 export default async function Navbar() {
   const session = await auth();
+  const canModerate = session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
 
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between border-b border-ink-800 bg-ink-950/90 px-4 py-3 backdrop-blur">
@@ -15,6 +16,15 @@ export default async function Navbar() {
       <nav className="flex items-center gap-4">
         {session?.user ? (
           <>
+            {canModerate ? (
+              <Link
+                href="/admin/moderation"
+                className="flex items-center gap-1 text-sm text-paper-100/70 hover:text-marquee-500"
+              >
+                <Shield size={16} />
+                Moderation
+              </Link>
+            ) : null}
             <Link
               href="/upload"
               className="flex items-center gap-1 rounded-full bg-marquee-500 px-3 py-1.5 text-sm font-medium text-ink-950 hover:bg-marquee-600"
