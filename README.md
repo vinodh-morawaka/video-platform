@@ -198,6 +198,19 @@ rather than firing `idle` at all) makes this rare; the webhook uses
 double-collision isn't specially handled. Worth revisiting if it ever
 actually happens.
 
+**Webhooks are best-effort — there's a manual fallback.** Real testing
+(against production, not just a local tunnel) showed that even with
+both `video.asset.ready` and `video.asset.live_stream_completed`
+handled, a delivery can still occasionally just not arrive. Rather
+than chasing perfect webhook reliability, any video stuck at
+`PROCESSING` shows a "Refresh status" button (to its uploader, or a
+moderator/admin) that asks Mux directly what's actually true —
+`reconcileVideoWithMux` in `src/lib/videos.ts`, via
+`findAssetIdFor` in `src/lib/mux.ts`, which walks live-stream →
+`recent_asset_ids` → asset (or upload → `asset_id` → asset, for a
+stuck plain upload) rather than waiting on a notification that may
+never come.
+
 **Explicitly not built in this pass:** live chat, viewer count, follow
 notifications when a channel goes live, and scheduling a stream in
 advance. Each is a real, separate feature, deliberately scoped out to

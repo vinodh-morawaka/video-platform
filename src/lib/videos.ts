@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import type { Visibility, VideoStatus } from "@prisma/client";
+import { findAssetIdFor, getAsset } from "@/lib/mux";
 
 export async function getFeedVideos({ take = 24, cursor }: { take?: number; cursor?: string } = {}) {
   // MVP discovery: newest-first from everyone. This is intentionally the
@@ -121,4 +122,54 @@ export async function getUsersOpenReportsForVideo(userId: string, videoId: strin
     video: reports.some((r) => r.videoId === videoId),
     commentIds: new Set<string>(reports.filter((r) => r.commentId).map((r) => r.commentId as string)),
   };
+}
+
+// Fallback for when the webhook that should have flipped a video from
+// PROCESSING to READY (or FAILED) never arrives — webhooks are inherently
+// best-effort, and this happened in real testing even against a stable
+// production URL, not just a flaky local tunnel. Rather than trusting a
+// notification that may never come, ask Mux directly what's actually true
+// right now and update the row accordingly.
+export async function reconcileVideoWithMux(id: string) {
+  const video = await prisma.video.findUnique({
+    where: { id },
+    select: { id: true, providerAssetId: true, status: true },
+  });
+  if (!video) return { updated: false, reason: "Video not found" as const };
+  if (video.status !== "PROCESSING" && video.status !== "LIVE") {
+    return { updated: false, reason: "Not stuck — nothing to reconcile" as const };
+  }
+  if (!video.providerAssetId) {
+    return { updated: false, reason: "No provider reference on this video" as const };
+  }
+
+  const assetId = await findAssetIdFor(video.providerAssetId);
+  if (!assetId) {
+    return { updated: false, reason: "Still processing on Mux's side" as const };
+  }
+
+  const asset = await getAsset(assetId);
+
+  if (asset.status === "ready") {
+    const playbackId = asset.playback_ids?.[0]?.id;
+    await prisma.video.update({
+      where: { id },
+      data: {
+        providerAssetId: asset.id,
+        status: "READY",
+        playbackId,
+        thumbnailUrl: playbackId ? `https://image.mux.com/${playbackId}/thumbnail.jpg` : undefined,
+        durationSeconds: asset.duration ? Math.round(asset.duration) : undefined,
+        publishedAt: new Date(),
+      },
+    });
+    return { updated: true, status: "READY" as const };
+  }
+
+  if (asset.status === "errored") {
+    await prisma.video.update({ where: { id }, data: { status: "FAILED" } });
+    return { updated: true, status: "FAILED" as const };
+  }
+
+  return { updated: false, reason: `Still ${asset.status} on Mux's side` as const };
 }

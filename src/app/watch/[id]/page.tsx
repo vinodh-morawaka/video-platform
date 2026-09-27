@@ -4,6 +4,7 @@ import { getVideoById, getUsersOpenReportsForVideo } from "@/lib/videos";
 import VideoPlayer from "@/components/VideoPlayer";
 import CommentsSection from "@/components/CommentsSection";
 import ReportButton from "@/components/ReportButton";
+import RefreshStatusButton from "@/components/RefreshStatusButton";
 import { auth } from "@/lib/auth";
 
 export default async function WatchPage({ params }: { params: Promise<{ id: string }> }) {
@@ -15,6 +16,14 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
   const alreadyReported = session?.user
     ? await getUsersOpenReportsForVideo(session.user.id, video.id, commentIds)
     : null;
+  const canReconcile =
+    video.status === "PROCESSING" &&
+    Boolean(
+      session?.user &&
+        (session.user.id === video.uploaderId ||
+          session.user.role === "ADMIN" ||
+          session.user.role === "MODERATOR"),
+    );
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6">
@@ -28,8 +37,9 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
         ) : video.status === "READY" && video.playbackId ? (
           <VideoPlayer playbackId={video.playbackId} videoId={video.id} />
         ) : (
-          <div className="flex aspect-video items-center justify-center text-paper-100/50">
+          <div className="flex aspect-video flex-col items-center justify-center text-paper-100/50">
             Still processing — check back shortly.
+            {canReconcile ? <RefreshStatusButton videoId={video.id} /> : null}
           </div>
         )}
       </div>
