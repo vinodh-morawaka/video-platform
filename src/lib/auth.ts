@@ -46,11 +46,17 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     // `config.matcher`, but keep this scoped explicitly in case that
     // matcher list grows later.
     authorized({ auth, request }) {
-      if (request.nextUrl.pathname.startsWith("/admin")) {
+      const path = request.nextUrl.pathname;
+      if (path.startsWith("/admin/users")) {
+        // Managing roles is more sensitive than moderating content —
+        // ADMIN only, not MODERATOR.
+        return auth?.user?.role === "ADMIN";
+      }
+      if (path.startsWith("/admin")) {
         const role = auth?.user?.role;
         return role === "ADMIN" || role === "MODERATOR";
       }
-      if (request.nextUrl.pathname.startsWith("/upload")) {
+      if (path.startsWith("/upload")) {
         return Boolean(auth?.user);
       }
       return true;

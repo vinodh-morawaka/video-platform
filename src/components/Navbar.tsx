@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Upload, Home, Shield } from "lucide-react";
+import { Upload, Home, Shield, Users } from "lucide-react";
 import { auth } from "@/lib/auth";
 import SignOutButton from "@/components/SignOutButton";
 import SearchBox from "@/components/SearchBox";
@@ -7,6 +7,7 @@ import SearchBox from "@/components/SearchBox";
 export default async function Navbar() {
   const session = await auth();
   const canModerate = session?.user?.role === "ADMIN" || session?.user?.role === "MODERATOR";
+  const isAdmin = session?.user?.role === "ADMIN";
 
   return (
     <header className="sticky top-0 z-10 flex items-center justify-between gap-4 border-b border-ink-800 bg-ink-950/90 px-4 py-3 backdrop-blur">
@@ -25,6 +26,15 @@ export default async function Navbar() {
               >
                 <Shield size={16} />
                 Moderation
+              </Link>
+            ) : null}
+            {isAdmin ? (
+              <Link
+                href="/admin/users"
+                className="flex items-center gap-1 text-sm text-paper-100/70 hover:text-marquee-500"
+              >
+                <Users size={16} />
+                Users
               </Link>
             ) : null}
             <Link
