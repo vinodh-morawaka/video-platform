@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import mux from "@/lib/mux";
+import mux, { getLiveStream } from "@/lib/mux";
 
 // Configure this exact URL (https://yourapp.com/api/webhooks/mux) in the
 // Mux dashboard, and set MUX_WEBHOOK_SECRET so signatures verify below.
@@ -30,10 +30,17 @@ export async function POST(req: NextRequest) {
       break;
     }
     case "video.live_stream.active": {
-      // The creator started broadcasting. Find which Channel owns this
-      // persistent live stream, then create (or, on a duplicate webhook
-      // delivery, leave alone) the Video row viewers will see while live.
+      // The creator started broadcasting — in theory. Webhooks can be
+      // redelivered late (observed directly in testing: a duplicate
+      // "active" arrived well after the real session had already
+      // finished and its row had moved on, creating a phantom second
+      // row for a broadcast that never happened the second time). Ask
+      // Mux whether the stream is ACTUALLY active right now before
+      // creating anything, rather than trusting the notification blindly.
       const liveStream = event.data as { id: string };
+      const currentStream = await getLiveStream(liveStream.id).catch(() => null);
+      if (!currentStream || currentStream.status !== "active") break;
+
       const channel = await prisma.channel.findUnique({
         where: { muxLiveStreamId: liveStream.id },
         select: { id: true, ownerId: true, name: true, livePlaybackId: true },
