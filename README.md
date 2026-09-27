@@ -189,11 +189,17 @@ rewrite of every component.
 
 ## Known limitations / not built yet
 
-1. **Search is plain substring matching**, not Postgres full-text
+1. **No in-app change-password flow.** If any account's password needs
+   rotating (including your own admin account — worth doing once this
+   is more than a personal test site), the only path today is signing
+   up fresh and promoting the new account via Prisma Studio, then
+   demoting the old one. A real "change password" page is a legitimate
+   gap, not just a nice-to-have.
+2. **Search is plain substring matching**, not Postgres full-text
    search or a dedicated search service — fine at the current catalog
    size, worth upgrading once it isn't (see `searchVideos` in
    `src/lib/videos.ts` for the swap-out point).
-2. **Live streaming** — deliberately deferred per the MVP order (VOD
+3. **Live streaming** — deliberately deferred per the MVP order (VOD
    first). Mux also supports live ingest (RTMP → the same playback
    pipeline), so the same `Video`/`Channel` models should extend rather
    than need a parallel system — worth designing that extension before
