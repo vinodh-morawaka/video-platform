@@ -148,6 +148,20 @@ export async function reconcileVideoWithMux(id: string) {
     return { updated: false, reason: "Still processing on Mux's side" as const };
   }
 
+  // A live stream's `recent_asset_ids` covers its ENTIRE history across
+  // every broadcast ever done with it, not just this session — so the
+  // "most recent" one can actually belong to an earlier, already-resolved
+  // broadcast if Mux hasn't finished generating a new asset for THIS
+  // session yet. Reusing it would collide with providerAssetId's unique
+  // constraint on whichever row already legitimately claimed it.
+  const claimedByAnotherVideo = await prisma.video.findFirst({
+    where: { providerAssetId: assetId, id: { not: id } },
+    select: { id: true },
+  });
+  if (claimedByAnotherVideo) {
+    return { updated: false, reason: "Still processing on Mux's side" as const };
+  }
+
   let asset;
   try {
     asset = await getAsset(assetId);
