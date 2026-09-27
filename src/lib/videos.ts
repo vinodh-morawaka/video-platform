@@ -36,6 +36,7 @@ export async function getVideoById(id: string) {
         },
       },
       _count: { select: { likes: true } },
+      tags: { select: { name: true } },
     },
   });
 }
@@ -49,6 +50,44 @@ export async function getChannelBySlug(slug: string) {
         orderBy: { publishedAt: "desc" },
       },
       _count: { select: { followers: true } },
+    },
+  });
+}
+
+export async function getVideosByTag(name: string) {
+  return prisma.video.findMany({
+    where: {
+      status: "READY" as VideoStatus,
+      visibility: "PUBLIC" as Visibility,
+      tags: { some: { name: name.toLowerCase() } },
+    },
+    orderBy: { publishedAt: "desc" },
+    include: {
+      channel: { select: { name: true, slug: true, owner: { select: { avatarUrl: true } } } },
+    },
+  });
+}
+
+// Simple substring match on title/description, or an exact tag match — no
+// full-text search/ranking yet. Good enough for the current catalog size;
+// swap for Postgres full-text search (or a search service) once this
+// stops being sufficient, without needing to change any caller.
+export async function searchVideos(query: string) {
+  if (!query.trim()) return [];
+  return prisma.video.findMany({
+    where: {
+      status: "READY" as VideoStatus,
+      visibility: "PUBLIC" as Visibility,
+      OR: [
+        { title: { contains: query, mode: "insensitive" } },
+        { description: { contains: query, mode: "insensitive" } },
+        { tags: { some: { name: query.toLowerCase() } } },
+      ],
+    },
+    orderBy: { publishedAt: "desc" },
+    take: 48,
+    include: {
+      channel: { select: { name: true, slug: true, owner: { select: { avatarUrl: true } } } },
     },
   });
 }

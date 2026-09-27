@@ -156,7 +156,10 @@ rewrite of every component.
 1. **Dev and production currently share one database.** Convenient
    while solo-testing, but means local experiments and real user data
    live in the same place — split these before this has real users.
-2. **Search/tags UI** — `Tag` model exists; no UI yet.
+2. **Search is plain substring matching**, not Postgres full-text
+   search or a dedicated search service — fine at the current catalog
+   size, worth upgrading once it isn't (see `searchVideos` in
+   `src/lib/videos.ts` for the swap-out point).
 3. **Live streaming** — deliberately deferred per the MVP order (VOD
    first). Mux also supports live ingest (RTMP → the same playback
    pipeline), so the same `Video`/`Channel` models should extend rather

@@ -7,7 +7,18 @@ import { auth } from "@/lib/auth";
 const bodySchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().max(5000).optional(),
+  tags: z.array(z.string().min(1).max(30)).max(10).optional(),
 });
+
+function normalizeTags(tags?: string[]): string[] {
+  if (!tags) return [];
+  const seen = new Set<string>();
+  for (const raw of tags) {
+    const name = raw.trim().toLowerCase();
+    if (name) seen.add(name);
+  }
+  return Array.from(seen);
+}
 
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -19,7 +30,8 @@ export async function POST(req: NextRequest) {
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
-  const { title, description } = parsed.data;
+  const { title, description, tags } = parsed.data;
+  const tagNames = normalizeTags(tags);
 
   // Every user has exactly one Channel (created at sign-up), so this is
   // always a single lookup — no client-supplied channelId to trust.
@@ -42,6 +54,12 @@ export async function POST(req: NextRequest) {
       provider: "MUX",
       providerAssetId: uploadId, // temporarily the upload id; webhook swaps to asset id
       status: "PROCESSING",
+      tags: {
+        connectOrCreate: tagNames.map((name) => ({
+          where: { name },
+          create: { name },
+        })),
+      },
     },
   });
 

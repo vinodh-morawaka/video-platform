@@ -52,6 +52,19 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
         {video.description ? (
           <p className="mt-2 whitespace-pre-wrap text-sm text-paper-100/70">{video.description}</p>
         ) : null}
+        {video.tags.length > 0 ? (
+          <div className="mt-2 flex flex-wrap gap-2">
+            {video.tags.map((t) => (
+              <Link
+                key={t.name}
+                href={`/tag/${encodeURIComponent(t.name)}`}
+                className="rounded-full border border-ink-800 bg-ink-900 px-3 py-1.5 text-xs text-paper-100/70 hover:border-marquee-500 hover:text-marquee-500"
+              >
+                #{t.name}
+              </Link>
+            ))}
+          </div>
+        ) : null}
       </div>
 
       <CommentsSection

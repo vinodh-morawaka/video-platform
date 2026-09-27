@@ -8,6 +8,7 @@ export default function UploadForm() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [tagsInput, setTagsInput] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -24,7 +25,14 @@ export default function UploadForm() {
       const res = await fetch("/api/upload", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, description }),
+        body: JSON.stringify({
+          title,
+          description,
+          tags: tagsInput
+            .split(",")
+            .map((t) => t.trim())
+            .filter(Boolean),
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -65,6 +73,15 @@ export default function UploadForm() {
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             rows={4}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-sm text-paper-100/70">Tags</label>
+          <input
+            className="rounded-lg border border-ink-800 bg-ink-900 px-3 py-2 text-sm text-paper-100 focus:border-marquee-500 focus:outline-none"
+            value={tagsInput}
+            onChange={(e) => setTagsInput(e.target.value)}
+            placeholder="comma, separated, tags"
           />
         </div>
         <div className="flex flex-col gap-1">
