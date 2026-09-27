@@ -1,8 +1,9 @@
 # video-platform
 
-VOD-first video platform (YouTube+Twitch combined, live streaming later).
-Solo-dev friendly stack: Next.js on Vercel, managed Postgres, Mux for video
-infra — no self-hosted encoding/storage.
+VOD + live video platform (YouTube+Twitch combined). Solo-dev friendly
+stack: Next.js on Vercel, managed Postgres, Mux for all video infra
+(uploads, live ingest, transcoding, playback) — no self-hosted
+encoding/storage.
 
 **Live:** https://video-platform-kappa-nine.vercel.app
 
@@ -11,7 +12,7 @@ infra — no self-hosted encoding/storage.
 - **Next.js 16** (App Router, TypeScript, Tailwind v4)
 - **Prisma 5** + **Postgres** (Neon) — schema in `prisma/schema.prisma`
 - **Auth.js (NextAuth v5)** — email/password (Credentials provider), JWT sessions
-- **Mux** — direct-to-cloud uploads, transcoding, adaptive playback
+- **Mux** — direct-to-cloud uploads AND live (RTMP) ingest, transcoding, adaptive playback
 - **Vercel** — hosting; `prisma migrate deploy` runs automatically on every build (see `package.json`)
 
 ## Getting started
@@ -29,7 +30,9 @@ Sign up at mux.com, grab an API token (Settings → Access Tokens) for
 `MUX_TOKEN_ID` / `MUX_TOKEN_SECRET`, and add a webhook pointed at
 `/api/webhooks/mux` once you have a public URL (use `ngrok` locally, or
 just use your Vercel URL) — copy its signing secret into
-`MUX_WEBHOOK_SECRET`.
+`MUX_WEBHOOK_SECRET`. This one endpoint handles both upload/VOD events
+and live-stream events (`video.live_stream.active` / `.idle`) — no
+separate webhook needed for live.
 
 ### Neon / Vercel Postgres connection strings
 
@@ -80,6 +83,7 @@ src/
     tag/[name]/page.tsx      All public videos with a given tag
     search/page.tsx          Search results (reads ?q=)
     upload/page.tsx          Server wrapper: redirects to /login if signed out
+    go-live/page.tsx          Shows RTMP URL + stream key, or the one-time setup button
     login/page.tsx           Login form (NextAuth Credentials sign-in)
     signup/page.tsx          Sign-up form (posts to /api/auth/register)
     admin/moderation/page.tsx  Moderation queue (ADMIN/MODERATOR only)
@@ -93,7 +97,10 @@ src/
       upload/route.ts              POST: creates a Mux direct upload + pending Video row,
                                     connects/creates tags (uploader/channel come from the
                                     session, not the client)
-      webhooks/mux/route.ts        Mux → us: flips Video to READY once transcoded
+      webhooks/mux/route.ts        Mux → us: flips Video to READY once transcoded,
+                                    AND creates/updates the Video row for live streams
+      live/setup/route.ts          POST: lazily creates a channel's one persistent
+                                    Mux live stream (idempotent)
       reports/route.ts             POST: file a report against a video or comment
       admin/reports/[id]/route.ts  POST: resolve a report (hide content, or dismiss)
       admin/users/[id]/route.ts    PATCH: change a user's role (ADMIN only)
@@ -102,10 +109,12 @@ src/
     CommentForm.tsx, CommentsSection.tsx    Comment posting + replies
     ReportButton.tsx, ModerationQueue.tsx   Reporting + the admin moderation queue UI
     SearchBox.tsx, UserRoleManager.tsx      Navbar search + the admin user-role table
+    GoLiveSetup.tsx, StreamCredentials.tsx  The go-live setup button + credentials display
   lib/
     prisma.ts                Prisma client singleton
-    mux.ts                   Mux SDK wrapper (swap for Cloudflare Stream here if needed)
-    videos.ts                Video/channel/tag/search/report-state data-fetching
+    mux.ts                   Mux SDK wrapper — uploads AND live streams (swap for
+                              Cloudflare Stream here if needed)
+    videos.ts                Video/channel/tag/search/report-state/live-status data-fetching
     moderation.ts             getOpenReports() for the admin queue
     users.ts                  getAllUsers() for the admin user-role page
     auth.ts                  NextAuth config (Credentials provider, JWT sessions, role on session)
@@ -119,9 +128,12 @@ src/
 
 - `Channel` is separate from `User` (1:1 for now) so multi-owner/team
   channels are possible later without a migration that splits them apart.
-- `Video.status` (`PROCESSING` → `READY`/`FAILED`, or `REMOVED` if a
-  moderator hides it) tracks both the Mux transcode lifecycle and
-  moderation state in one field.
+- `Video.status` (`PROCESSING` → `READY`/`FAILED`, `LIVE` while
+  broadcasting, or `REMOVED` if a moderator hides it) tracks both the
+  Mux transcode/broadcast lifecycle and moderation state in one field.
+- `Channel.muxLiveStreamId`/`muxStreamKey`/`livePlaybackId` are set
+  once (lazily, on first `/go-live` setup) and reused for every future
+  broadcast — see "Live streaming" below.
 - `Comment.isHidden` is soft-moderation — a hidden comment stays in the
   database (for the reporter/moderator's record) but is filtered out of
   every query that renders comments publicly.
@@ -136,6 +148,50 @@ The home feed (`getFeedVideos` in `src/lib/videos.ts`) is deliberately
 for now, on purpose — the founding motivation was YouTube/Twitch burying
 small and new creators. If/when you add ranking, treat it as a
 replacement for that one query, not a rewrite of the pages that call it.
+
+## Live streaming
+
+One **persistent** Mux Live Stream per channel — created once, lazily,
+on first visit to `/go-live` (`POST /api/live/setup`, idempotent). The
+creator configures OBS (or similar) with the RTMP URL + stream key
+shown there a single time and reuses it for every future broadcast;
+nothing on our side needs to change between sessions.
+
+**Lifecycle, entirely webhook-driven** (`src/app/api/webhooks/mux/route.ts`):
+1. Creator starts broadcasting → Mux fires `video.live_stream.active`
+   → we create a `Video` row (`status: LIVE`, `providerAssetId` = the
+   live stream's own id) so it shows up in the feed/channel page
+   immediately, with a LIVE badge.
+2. Creator stops → after Mux's reconnect window elapses (NOT the same
+   as `video.live_stream.disconnected`, which might still reconnect),
+   `video.live_stream.idle` fires → that Video row moves to
+   `PROCESSING` and its live `playbackId` is cleared.
+3. Mux finishes turning the recording into a normal on-demand asset →
+   the SAME `video.asset.ready` handler used for regular uploads fires
+   again, now also matching on `asset.live_stream_id` → the Video row
+   becomes a completely ordinary `READY` video with its own VOD
+   playback id, thumbnail, duration, comments, tags, everything.
+
+That last point is the actual point of this design: a finished stream
+isn't a special "past broadcast" type — it's the exact same `Video`
+row, indistinguishable from an upload, appearing in search/tags/the
+feed like anything else.
+
+**Known edge case:** if a creator stops and near-instantly restarts
+within the same narrow window before `video.asset.ready` has landed
+for the previous session, the new `video.live_stream.active` could
+theoretically collide with the still-`PROCESSING` row's
+`providerAssetId` (which is `@unique`). In practice Mux's own
+reconnect window (a reconnect within it resumes the same session
+rather than firing `idle` at all) makes this rare; the webhook uses
+`upsert` so a duplicate delivery is at least harmless, but a genuine
+double-collision isn't specially handled. Worth revisiting if it ever
+actually happens.
+
+**Explicitly not built in this pass:** live chat, viewer count, follow
+notifications when a channel goes live, and scheduling a stream in
+advance. Each is a real, separate feature, deliberately scoped out to
+get the core go-live → watch → becomes-a-VOD loop working first.
 
 ## Moderation
 
@@ -199,9 +255,3 @@ rewrite of every component.
    search or a dedicated search service — fine at the current catalog
    size, worth upgrading once it isn't (see `searchVideos` in
    `src/lib/videos.ts` for the swap-out point).
-3. **Live streaming** — deliberately deferred per the MVP order (VOD
-   first). Mux also supports live ingest (RTMP → the same playback
-   pipeline), so the same `Video`/`Channel` models should extend rather
-   than need a parallel system — worth designing that extension before
-   you start, so live and VOD don't end up feeling like separate products
-   again.

@@ -25,6 +25,7 @@ export default async function HomePage() {
               viewCount={v.viewCount}
               channelName={v.channel.name}
               channelSlug={v.channel.slug}
+              isLive={v.status === "LIVE"}
             />
           ))}
         </div>

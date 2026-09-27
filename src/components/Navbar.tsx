@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Upload, Home, Shield, Users } from "lucide-react";
+import { Upload, Home, Shield, Users, Radio } from "lucide-react";
 import { auth } from "@/lib/auth";
 import SignOutButton from "@/components/SignOutButton";
 import SearchBox from "@/components/SearchBox";
@@ -37,6 +37,13 @@ export default async function Navbar() {
                 Users
               </Link>
             ) : null}
+            <Link
+              href="/go-live"
+              className="flex items-center gap-1 text-sm text-paper-100/70 hover:text-marquee-500"
+            >
+              <Radio size={16} />
+              Go Live
+            </Link>
             <Link
               href="/upload"
               className="flex items-center gap-1 rounded-full bg-marquee-500 px-3 py-1.5 text-sm font-medium text-ink-950 hover:bg-marquee-600"

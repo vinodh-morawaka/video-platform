@@ -23,7 +23,9 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
           <div className="flex aspect-video items-center justify-center text-paper-100/50">
             This video was removed for violating community guidelines.
           </div>
-        ) : video.playbackId ? (
+        ) : video.status === "LIVE" && video.playbackId ? (
+          <VideoPlayer playbackId={video.playbackId} videoId={video.id} isLive />
+        ) : video.status === "READY" && video.playbackId ? (
           <VideoPlayer playbackId={video.playbackId} videoId={video.id} />
         ) : (
           <div className="flex aspect-video items-center justify-center text-paper-100/50">
@@ -33,7 +35,14 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
       </div>
 
       <div className="flex flex-col gap-1">
-        <h1 className="font-display text-2xl font-bold text-paper-100">{video.title}</h1>
+        <div className="flex items-center gap-2">
+          {video.status === "LIVE" ? (
+            <span className="rounded bg-signal-500 px-1.5 py-0.5 text-xs font-medium text-ink-950">
+              LIVE
+            </span>
+          ) : null}
+          <h1 className="font-display text-2xl font-bold text-paper-100">{video.title}</h1>
+        </div>
         <div className="flex items-center gap-2 text-sm text-paper-100/50">
           <Link href={`/channel/${video.channel.slug}`} className="hover:text-marquee-500">
             {video.channel.name}

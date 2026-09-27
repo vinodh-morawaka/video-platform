@@ -30,6 +30,7 @@ export default async function ChannelPage({ params }: { params: Promise<{ slug: 
             viewCount={v.viewCount}
             channelName={channel.name}
             channelSlug={channel.slug}
+            isLive={v.status === "LIVE"}
           />
         ))}
       </div>

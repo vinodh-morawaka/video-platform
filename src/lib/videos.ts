@@ -8,7 +8,7 @@ export async function getFeedVideos({ take = 24, cursor }: { take?: number; curs
   // Anything smarter (recency + engagement blend, personalization) should
   // replace just this query, not the callers.
   return prisma.video.findMany({
-    where: { status: "READY" as VideoStatus, visibility: "PUBLIC" as Visibility },
+    where: { status: { in: ["READY", "LIVE"] as VideoStatus[] }, visibility: "PUBLIC" as Visibility },
     orderBy: { publishedAt: "desc" },
     take,
     ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
@@ -46,7 +46,7 @@ export async function getChannelBySlug(slug: string) {
     where: { slug },
     include: {
       videos: {
-        where: { status: "READY" as VideoStatus, visibility: "PUBLIC" as Visibility },
+        where: { status: { in: ["READY", "LIVE"] as VideoStatus[] }, visibility: "PUBLIC" as Visibility },
         orderBy: { publishedAt: "desc" },
       },
       _count: { select: { followers: true } },
@@ -89,6 +89,13 @@ export async function searchVideos(query: string) {
     include: {
       channel: { select: { name: true, slug: true, owner: { select: { avatarUrl: true } } } },
     },
+  });
+}
+
+export async function getChannelLiveVideo(channelId: string) {
+  return prisma.video.findFirst({
+    where: { channelId, status: "LIVE" as VideoStatus },
+    select: { id: true, title: true },
   });
 }
 

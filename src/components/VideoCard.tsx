@@ -11,6 +11,7 @@ type VideoCardProps = {
   viewCount: number;
   channelName: string;
   channelSlug: string;
+  isLive?: boolean;
 };
 
 function formatDuration(seconds?: number | null) {
@@ -28,6 +29,7 @@ export default function VideoCard({
   viewCount,
   channelName,
   channelSlug,
+  isLive,
 }: VideoCardProps) {
   const router = useRouter();
 
@@ -53,10 +55,14 @@ export default function VideoCard({
           />
         ) : (
           <div className="flex h-full w-full items-center justify-center text-paper-100/40 text-sm">
-            No thumbnail
+            {isLive ? "Live" : "No thumbnail"}
           </div>
         )}
-        {durationSeconds ? (
+        {isLive ? (
+          <span className="absolute bottom-1 right-1 rounded bg-signal-500 px-1.5 py-0.5 text-xs font-medium text-ink-950">
+            LIVE
+          </span>
+        ) : durationSeconds ? (
           <span className="absolute bottom-1 right-1 rounded bg-ink-950/80 px-1.5 py-0.5 text-xs text-paper-100">
             {formatDuration(durationSeconds)}
           </span>

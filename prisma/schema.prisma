@@ -62,6 +62,14 @@ model Channel {
   bannerUrl   String?
   createdAt   DateTime @default(now())
 
+  // A persistent, reusable Mux Live Stream — created once per channel
+  // (lazily, on first visit to /go-live), not per broadcast session. The
+  // creator points OBS/etc. at the same RTMP URL + streamKey every time;
+  // Mux itself flips between idle/active as they start/stop broadcasting.
+  muxLiveStreamId String? @unique
+  muxStreamKey    String? // sensitive — only ever shown to the channel's own owner
+  livePlaybackId  String? // public playback id for viewers while live
+
   videos      Video[]
   followers   Follow[]
 
@@ -83,7 +91,7 @@ model Follow {
   @@unique([followerId, channelId])
 }
 
-// ---------- Video (VOD first; live fields reserved for later) ----------
+// ---------- Video (VOD + live share this one model — see status: LIVE) ----------
 
 model Video {
   id            String       @id @default(cuid())
@@ -130,6 +138,7 @@ enum VideoStatus {
   READY
   FAILED
   REMOVED
+  LIVE
 }
 
 enum Visibility {

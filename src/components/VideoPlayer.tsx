@@ -6,9 +6,11 @@ import { useRef } from "react";
 export default function VideoPlayer({
   playbackId,
   videoId,
+  isLive,
 }: {
   playbackId: string;
   videoId: string;
+  isLive?: boolean;
 }) {
   const counted = useRef(false);
 
@@ -16,10 +18,10 @@ export default function VideoPlayer({
     <MuxPlayer
       playbackId={playbackId}
       metadata={{ video_id: videoId }}
-      streamType="on-demand"
+      streamType={isLive ? "live" : "on-demand"}
       className="aspect-video w-full"
       onPlay={() => {
-        if (counted.current) return;
+        if (isLive || counted.current) return;
         counted.current = true;
         fetch(`/api/videos/${videoId}`, { method: "POST" }).catch(() => {});
       }}
