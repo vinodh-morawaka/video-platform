@@ -40,6 +40,27 @@ serverless functions both open many short-lived connections, which
 Neon's free tier will otherwise close under you — see the `directUrl`
 comment in `prisma/schema.prisma`.
 
+### Local dev uses a separate database branch
+
+Local development points at a Neon **branch** (`development`), not
+the production database — created once via Neon's "Create child
+branch" (an instant copy of prod's schema + data, then fully
+isolated going forward). Local `.env` has that branch's connection
+strings; Vercel's production env vars are untouched and still point
+at `main`. If you ever recreate this: `.env` is the only file that
+matters for both `npm run dev` and the Prisma CLI — **`.env.local`
+must not also define `DATABASE_URL`/`DIRECT_URL`**, since Next.js
+would silently prefer `.env.local`'s value for the running app while
+the Prisma CLI keeps reading `.env`, leaving the two disagreeing
+about which database is real.
+
+One consequence: Mux's webhook is configured for the production URL,
+so videos uploaded through `npm run dev` will sit at `PROCESSING`
+forever unless you also set up a second Mux webhook endpoint pointed
+at a local `ngrok` tunnel (same idea as the "Getting a Mux account"
+section above, just a second endpoint rather than replacing the
+production one).
+
 ### Uploading
 
 Sign up at `/signup`, log in at `/login`, then go to `/upload` — every
@@ -50,39 +71,47 @@ dev-user workaround.
 ## Project structure
 
 ```
-prisma/schema.prisma        Data model (User, Channel, Video, Comment, Like, Report, ...)
+prisma/schema.prisma        Data model (User, Channel, Video, Comment, Like, Report, Tag, ...)
 src/
   app/
     page.tsx                Home feed (newest videos — see "On the algorithm" below)
-    watch/[id]/page.tsx      Watch page (Mux player, comments, report buttons)
+    watch/[id]/page.tsx      Watch page (Mux player, comments, tags, report buttons)
     channel/[slug]/page.tsx  Channel page
+    tag/[name]/page.tsx      All public videos with a given tag
+    search/page.tsx          Search results (reads ?q=)
     upload/page.tsx          Server wrapper: redirects to /login if signed out
     login/page.tsx           Login form (NextAuth Credentials sign-in)
     signup/page.tsx          Sign-up form (posts to /api/auth/register)
     admin/moderation/page.tsx  Moderation queue (ADMIN/MODERATOR only)
+    admin/users/page.tsx      User role management (ADMIN only)
     api/
       auth/[...nextauth]/route.ts  NextAuth's own handler (session, sign-in, sign-out)
       auth/register/route.ts       Custom sign-up: hashes password, creates User + Channel
       videos/route.ts              GET feed
       videos/[id]/route.ts         GET one video, POST to bump view count
       videos/[id]/comments/route.ts POST a comment or reply
-      upload/route.ts              POST: creates a Mux direct upload + pending Video row
-                                    (uploader/channel come from the session, not the client)
+      upload/route.ts              POST: creates a Mux direct upload + pending Video row,
+                                    connects/creates tags (uploader/channel come from the
+                                    session, not the client)
       webhooks/mux/route.ts        Mux → us: flips Video to READY once transcoded
       reports/route.ts             POST: file a report against a video or comment
       admin/reports/[id]/route.ts  POST: resolve a report (hide content, or dismiss)
+      admin/users/[id]/route.ts    PATCH: change a user's role (ADMIN only)
   components/
     VideoCard.tsx, VideoPlayer.tsx, Navbar.tsx, UploadForm.tsx, SignOutButton.tsx
     CommentForm.tsx, CommentsSection.tsx    Comment posting + replies
-    ReportButton.tsx, ModerationQueue.tsx   Reporting + the admin queue UI
+    ReportButton.tsx, ModerationQueue.tsx   Reporting + the admin moderation queue UI
+    SearchBox.tsx, UserRoleManager.tsx      Navbar search + the admin user-role table
   lib/
     prisma.ts                Prisma client singleton
     mux.ts                   Mux SDK wrapper (swap for Cloudflare Stream here if needed)
-    videos.ts                All video/channel/report-state data-fetching lives here
+    videos.ts                Video/channel/tag/search/report-state data-fetching
     moderation.ts             getOpenReports() for the admin queue
+    users.ts                  getAllUsers() for the admin user-role page
     auth.ts                  NextAuth config (Credentials provider, JWT sessions, role on session)
   middleware.ts               Redirects signed-out visitors away from /upload,
-                               non-moderators away from /admin/*
+                               non-moderators away from /admin/*, non-admins away
+                               from /admin/users specifically
   types/next-auth.d.ts        Adds id/username/role to NextAuth's Session type
 ```
 
@@ -121,10 +150,17 @@ either hides the content (`Video.status = REMOVED` or
 `Comment.isHidden = true`) or dismisses the report — both close it out.
 
 **To access the queue:** the page and its API route both require
-`role` to be `ADMIN` or `MODERATOR` on the `User` row. There's no
-invite UI yet — promote yourself via `npx prisma studio` (edit your
-`User` row's `role`), then log out and back in, since `role` is baked
-into the session at login time and won't update on a running session.
+`role` to be `ADMIN` or `MODERATOR` on the `User` row.
+
+**Granting roles:** `/admin/users` (ADMIN only — stricter than the
+moderation queue itself) lists every user with a role dropdown per
+row. The one thing it can't do is promote *itself* into existence:
+your very first `ADMIN` has to be set via `npx prisma studio` (edit
+your own `User` row's `role`), since you need an existing admin to
+grant admin through the UI. After that, use `/admin/users` for
+everyone else. Either way, log out and back in after a role change —
+`role` is baked into the session at login time and won't update on a
+running session.
 
 ## Auth
 
@@ -153,18 +189,13 @@ rewrite of every component.
 
 ## Known limitations / not built yet
 
-1. **Dev and production currently share one database.** Convenient
-   while solo-testing, but means local experiments and real user data
-   live in the same place — split these before this has real users.
-2. **Search is plain substring matching**, not Postgres full-text
+1. **Search is plain substring matching**, not Postgres full-text
    search or a dedicated search service — fine at the current catalog
    size, worth upgrading once it isn't (see `searchVideos` in
    `src/lib/videos.ts` for the swap-out point).
-3. **Live streaming** — deliberately deferred per the MVP order (VOD
+2. **Live streaming** — deliberately deferred per the MVP order (VOD
    first). Mux also supports live ingest (RTMP → the same playback
    pipeline), so the same `Video`/`Channel` models should extend rather
    than need a parallel system — worth designing that extension before
    you start, so live and VOD don't end up feeling like separate products
    again.
-4. **No admin-invite flow** — promoting a moderator is a manual
-   Prisma Studio edit (see Moderation, above).
