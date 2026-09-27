@@ -70,7 +70,8 @@ export async function POST(req: NextRequest) {
       });
       break;
     }
-    case "video.asset.ready": {
+    case "video.asset.ready":
+    case "video.asset.live_stream_completed": {
       const asset = event.data as {
         id: string;
         upload_id?: string;
@@ -84,6 +85,11 @@ export async function POST(req: NextRequest) {
       // swap-order alone caused ready events that arrive first to
       // silently match zero rows and leave videos stuck at PROCESSING
       // forever.
+      //
+      // Live-originated assets fire BOTH "video.asset.live_stream_completed"
+      // and "video.asset.ready" — sometimes with a real delay between them,
+      // and testing showed "ready" alone isn't a reliable enough signal on
+      // its own. Handling both here is idempotent (safe if both arrive).
       const playbackId = asset.playback_ids?.[0]?.id;
       await prisma.video.updateMany({
         where: {

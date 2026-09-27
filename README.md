@@ -167,10 +167,20 @@ nothing on our side needs to change between sessions.
    `video.live_stream.idle` fires → that Video row moves to
    `PROCESSING` and its live `playbackId` is cleared.
 3. Mux finishes turning the recording into a normal on-demand asset →
-   the SAME `video.asset.ready` handler used for regular uploads fires
-   again, now also matching on `asset.live_stream_id` → the Video row
-   becomes a completely ordinary `READY` video with its own VOD
-   playback id, thumbnail, duration, comments, tags, everything.
+   fires `video.asset.live_stream_completed` (and separately,
+   `video.asset.ready`) — the SAME handler used for regular uploads'
+   ready event now also runs for both of these, matching on
+   `asset.live_stream_id` → the Video row becomes a completely ordinary
+   `READY` video with its own VOD playback id, thumbnail, duration,
+   comments, tags, everything.
+
+Testing this live (not just reading Mux's docs) surfaced a real gap:
+`video.asset.ready` alone was NOT a reliable enough signal for a
+live-originated asset in practice — `video.asset.live_stream_completed`
+is a genuinely separate event Mux also fires, and relying on `ready`
+alone left videos stuck at `PROCESSING` indefinitely on both local
+(ngrok) and production testing. Both are now handled identically in
+`src/app/api/webhooks/mux/route.ts` (idempotent if both arrive).
 
 That last point is the actual point of this design: a finished stream
 isn't a special "past broadcast" type — it's the exact same `Video`
