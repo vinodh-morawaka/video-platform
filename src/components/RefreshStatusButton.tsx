@@ -13,7 +13,10 @@ export default function RefreshStatusButton({ videoId }: { videoId: string }) {
     setMessage(null);
     try {
       const res = await fetch(`/api/videos/${videoId}/reconcile`, { method: "POST" });
-      const data = await res.json();
+      const data = await res.json().catch(() => null);
+      if (!data) {
+        throw new Error("Failed to check status — try again shortly.");
+      }
       if (!res.ok) {
         throw new Error(data.error ?? "Failed to check status");
       }

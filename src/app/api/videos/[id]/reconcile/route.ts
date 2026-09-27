@@ -21,6 +21,16 @@ export async function POST(_req: Request, { params }: { params: Promise<{ id: st
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const result = await reconcileVideoWithMux(id);
-  return NextResponse.json(result);
+  try {
+    const result = await reconcileVideoWithMux(id);
+    return NextResponse.json(result);
+  } catch (err) {
+    // Belt-and-suspenders: reconcileVideoWithMux already catches the
+    // specific failure modes we anticipated, but this route should never
+    // crash with an empty/non-JSON body regardless of what goes wrong —
+    // that's exactly what caused a confusing "Unexpected end of JSON
+    // input" on the client the one time this wasn't here.
+    console.error("Video reconciliation failed:", err);
+    return NextResponse.json({ error: "Couldn't check status right now" }, { status: 500 });
+  }
 }

@@ -148,7 +148,14 @@ export async function reconcileVideoWithMux(id: string) {
     return { updated: false, reason: "Still processing on Mux's side" as const };
   }
 
-  const asset = await getAsset(assetId);
+  let asset;
+  try {
+    asset = await getAsset(assetId);
+  } catch {
+    // The id we guessed doesn't correspond to a real, retrievable asset —
+    // report this plainly instead of throwing and crashing the route.
+    return { updated: false, reason: "Couldn't find a matching asset on Mux" as const };
+  }
 
   if (asset.status === "ready") {
     const playbackId = asset.playback_ids?.[0]?.id;
