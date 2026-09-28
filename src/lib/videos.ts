@@ -137,15 +137,15 @@ export async function reconcileVideoWithMux(id: string) {
   });
   if (!video) return { updated: false, reason: "Video not found" as const };
   if (video.status !== "PROCESSING" && video.status !== "LIVE") {
-    return { updated: false, reason: "Not stuck — nothing to reconcile" as const };
+    return { updated: false, reason: "Nothing to check — this video is already up to date." as const };
   }
   if (!video.providerAssetId) {
-    return { updated: false, reason: "No provider reference on this video" as const };
+    return { updated: false, reason: "Couldn't check this video right now." as const };
   }
 
   const assetId = await findAssetIdFor(video.providerAssetId);
   if (!assetId) {
-    return { updated: false, reason: "Still processing on Mux's side" as const };
+    return { updated: false, reason: "Still processing — try again in a minute." as const };
   }
 
   // A live stream's `recent_asset_ids` covers its ENTIRE history across
@@ -159,7 +159,7 @@ export async function reconcileVideoWithMux(id: string) {
     select: { id: true },
   });
   if (claimedByAnotherVideo) {
-    return { updated: false, reason: "Still processing on Mux's side" as const };
+    return { updated: false, reason: "Still processing — try again in a minute." as const };
   }
 
   let asset;
@@ -168,7 +168,7 @@ export async function reconcileVideoWithMux(id: string) {
   } catch {
     // The id we guessed doesn't correspond to a real, retrievable asset —
     // report this plainly instead of throwing and crashing the route.
-    return { updated: false, reason: "Couldn't find a matching asset on Mux" as const };
+    return { updated: false, reason: "Couldn't find the finished video yet — try again shortly." as const };
   }
 
   if (asset.status === "ready") {
@@ -192,5 +192,5 @@ export async function reconcileVideoWithMux(id: string) {
     return { updated: true, status: "FAILED" as const };
   }
 
-  return { updated: false, reason: `Still ${asset.status} on Mux's side` as const };
+  return { updated: false, reason: "Still processing — try again in a minute." as const };
 }

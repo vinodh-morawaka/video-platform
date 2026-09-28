@@ -2,6 +2,47 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import mux, { getLiveStream } from "@/lib/mux";
 
+// Resolve an asset event to exactly ONE Video row. The old approach was a
+// single broad OR-match (upload id / live stream id / asset id) fed to
+// updateMany — but a channel's live stream id is shared by every broadcast
+// it ever does, so that query could match two rows at once (the row that
+// already holds this asset's id, plus any other row still holding the live
+// stream id) and then try to give both the same providerAssetId, tripping
+// its unique constraint. The webhook crashed with a 500, Mux retried, and
+// the retries failed identically. Checking in a fixed order and stopping
+// at the first hit can't match more than one row.
+async function findVideoIdForAsset(asset: { id: string; upload_id?: string; live_stream_id?: string }) {
+  // 1. Already linked to this exact asset (e.g. the second of "ready" and
+  //    "live_stream_completed", or a redelivery) — refresh that row only.
+  const linked = await prisma.video.findUnique({
+    where: { providerAssetId: asset.id },
+    select: { id: true },
+  });
+  if (linked) return linked.id;
+
+  // 2. A direct upload that hasn't been swapped to its asset id yet.
+  if (asset.upload_id) {
+    const upload = await prisma.video.findUnique({
+      where: { providerAssetId: asset.upload_id },
+      select: { id: true },
+    });
+    if (upload) return upload.id;
+  }
+
+  // 3. A broadcast that has ended (PROCESSING) and is still holding the
+  //    shared live stream id. Requiring PROCESSING keeps a currently-live
+  //    session from being claimed by an event for an earlier recording.
+  if (asset.live_stream_id) {
+    const ended = await prisma.video.findFirst({
+      where: { providerAssetId: asset.live_stream_id, status: "PROCESSING" },
+      select: { id: true },
+    });
+    if (ended) return ended.id;
+  }
+
+  return null;
+}
+
 // Configure this exact URL (https://yourapp.com/api/webhooks/mux) in the
 // Mux dashboard, and set MUX_WEBHOOK_SECRET so signatures verify below.
 export async function POST(req: NextRequest) {
@@ -86,51 +127,35 @@ export async function POST(req: NextRequest) {
         playback_ids?: { id: string }[];
         duration?: number;
       };
-      // Match on the original upload id, the asset id, OR (for a
-      // completed live broadcast) the live stream id — whichever this
-      // Video row still holds as its providerAssetId. Relying on
-      // swap-order alone caused ready events that arrive first to
-      // silently match zero rows and leave videos stuck at PROCESSING
-      // forever.
-      //
       // Live-originated assets fire BOTH "video.asset.live_stream_completed"
       // and "video.asset.ready" — sometimes with a real delay between them,
       // and testing showed "ready" alone isn't a reliable enough signal on
       // its own. Handling both here is idempotent (safe if both arrive).
       const playbackId = asset.playback_ids?.[0]?.id;
-      await prisma.video.updateMany({
-        where: {
-          OR: [
-            ...(asset.upload_id ? [{ providerAssetId: asset.upload_id }] : []),
-            ...(asset.live_stream_id ? [{ providerAssetId: asset.live_stream_id }] : []),
-            { providerAssetId: asset.id },
-          ],
-        },
-        data: {
-          providerAssetId: asset.id,
-          status: "READY",
-          playbackId,
-          // Mux auto-generates a thumbnail for every playback id at this
-          // predictable URL — no separate API call needed.
-          thumbnailUrl: playbackId ? `https://image.mux.com/${playbackId}/thumbnail.jpg` : undefined,
-          durationSeconds: asset.duration ? Math.round(asset.duration) : undefined,
-          publishedAt: new Date(),
-        },
-      });
+      const videoId = await findVideoIdForAsset(asset);
+      if (videoId) {
+        await prisma.video.update({
+          where: { id: videoId },
+          data: {
+            providerAssetId: asset.id,
+            status: "READY",
+            playbackId,
+            // Mux auto-generates a thumbnail for every playback id at this
+            // predictable URL — no separate API call needed.
+            thumbnailUrl: playbackId ? `https://image.mux.com/${playbackId}/thumbnail.jpg` : undefined,
+            durationSeconds: asset.duration ? Math.round(asset.duration) : undefined,
+            publishedAt: new Date(),
+          },
+        });
+      }
       break;
     }
     case "video.asset.errored": {
       const asset = event.data as { id: string; upload_id?: string; live_stream_id?: string };
-      await prisma.video.updateMany({
-        where: {
-          OR: [
-            ...(asset.upload_id ? [{ providerAssetId: asset.upload_id }] : []),
-            ...(asset.live_stream_id ? [{ providerAssetId: asset.live_stream_id }] : []),
-            { providerAssetId: asset.id },
-          ],
-        },
-        data: { status: "FAILED" },
-      });
+      const videoId = await findVideoIdForAsset(asset);
+      if (videoId) {
+        await prisma.video.update({ where: { id: videoId }, data: { status: "FAILED" } });
+      }
       break;
     }
     default:

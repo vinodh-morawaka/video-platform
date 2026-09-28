@@ -39,7 +39,7 @@ export default function RefreshStatusButton({ videoId }: { videoId: string }) {
         disabled={submitting}
         className="rounded-full border border-ink-800 px-3 py-1.5 text-xs text-paper-100/70 hover:border-marquee-500 hover:text-marquee-500 disabled:opacity-40"
       >
-        {submitting ? "Checking…" : "Refresh status"}
+        {submitting ? "Checking…" : "Check again"}
       </button>
       {message ? <p className="text-xs text-paper-100/40">{message}</p> : null}
     </div>

@@ -5,6 +5,7 @@ import VideoPlayer from "@/components/VideoPlayer";
 import CommentsSection from "@/components/CommentsSection";
 import ReportButton from "@/components/ReportButton";
 import RefreshStatusButton from "@/components/RefreshStatusButton";
+import AutoRefresh from "@/components/AutoRefresh";
 import { auth } from "@/lib/auth";
 
 export default async function WatchPage({ params }: { params: Promise<{ id: string }> }) {
@@ -27,15 +28,19 @@ export default async function WatchPage({ params }: { params: Promise<{ id: stri
 
   return (
     <div className="mx-auto flex max-w-5xl flex-col gap-4 px-4 py-6">
+      {video.status === "LIVE" || video.status === "PROCESSING" ? <AutoRefresh /> : null}
       <div className="overflow-hidden rounded-xl bg-ink-900">
         {video.status === "REMOVED" ? (
           <div className="flex aspect-video items-center justify-center text-paper-100/50">
             This video was removed for violating community guidelines.
           </div>
         ) : video.status === "LIVE" && video.playbackId ? (
-          <VideoPlayer playbackId={video.playbackId} videoId={video.id} isLive />
+          // Distinct keys: with auto-refresh a page can jump straight from
+          // live to ready without ever rendering "processing" in between,
+          // and React would otherwise reuse the live-mode player instance.
+          <VideoPlayer key="live" playbackId={video.playbackId} videoId={video.id} isLive />
         ) : video.status === "READY" && video.playbackId ? (
-          <VideoPlayer playbackId={video.playbackId} videoId={video.id} />
+          <VideoPlayer key="vod" playbackId={video.playbackId} videoId={video.id} />
         ) : (
           <div className="flex aspect-video flex-col items-center justify-center text-paper-100/50">
             Still processing — check back shortly.

@@ -6,6 +6,7 @@ import { getChannelLiveVideo } from "@/lib/videos";
 import { MUX_RTMP_URL } from "@/lib/mux";
 import GoLiveSetup from "@/components/GoLiveSetup";
 import StreamCredentials from "@/components/StreamCredentials";
+import AutoRefresh from "@/components/AutoRefresh";
 
 export default async function GoLivePage() {
   const session = await auth();
@@ -18,6 +19,10 @@ export default async function GoLivePage() {
 
   return (
     <div className="mx-auto max-w-xl px-4 py-8">
+      {/* Once a stream is set up, keep checking whether the broadcast has
+          started/stopped so the banner below updates without a reload. Client
+          state here (e.g. the revealed stream key) survives each refresh. */}
+      {channel.muxLiveStreamId ? <AutoRefresh intervalMs={5_000} /> : null}
       <h1 className="mb-6 font-display text-2xl font-bold text-paper-100">Go live</h1>
 
       {liveVideo ? (
