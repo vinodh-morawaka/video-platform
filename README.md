@@ -94,6 +94,9 @@ src/
       videos/route.ts              GET feed
       videos/[id]/route.ts         GET one video, POST to bump view count
       videos/[id]/comments/route.ts POST a comment or reply
+      videos/[id]/reconcile/route.ts POST: "Check again" — asks Mux directly whether a
+                                    video stuck at PROCESSING is actually done
+                                    (uploader or moderator/admin only)
       upload/route.ts              POST: creates a Mux direct upload + pending Video row,
                                     connects/creates tags (uploader/channel come from the
                                     session, not the client)
@@ -110,6 +113,8 @@ src/
     ReportButton.tsx, ModerationQueue.tsx   Reporting + the admin moderation queue UI
     SearchBox.tsx, UserRoleManager.tsx      Navbar search + the admin user-role table
     GoLiveSetup.tsx, StreamCredentials.tsx  The go-live setup button + credentials display
+    AutoRefresh.tsx          Polls router.refresh() while a video is LIVE/PROCESSING
+    RefreshStatusButton.tsx  The "Check again" button shown on a video stuck at PROCESSING
   lib/
     prisma.ts                Prisma client singleton
     mux.ts                   Mux SDK wrapper — uploads AND live streams (swap for
@@ -167,49 +172,72 @@ nothing on our side needs to change between sessions.
    `video.live_stream.idle` fires → that Video row moves to
    `PROCESSING` and its live `playbackId` is cleared.
 3. Mux finishes turning the recording into a normal on-demand asset →
-   fires `video.asset.live_stream_completed` (and separately,
-   `video.asset.ready`) — the SAME handler used for regular uploads'
-   ready event now also runs for both of these, matching on
-   `asset.live_stream_id` → the Video row becomes a completely ordinary
-   `READY` video with its own VOD playback id, thumbnail, duration,
-   comments, tags, everything.
-
-Testing this live (not just reading Mux's docs) surfaced a real gap:
-`video.asset.ready` alone was NOT a reliable enough signal for a
-live-originated asset in practice — `video.asset.live_stream_completed`
-is a genuinely separate event Mux also fires, and relying on `ready`
-alone left videos stuck at `PROCESSING` indefinitely on both local
-(ngrok) and production testing. Both are now handled identically in
-`src/app/api/webhooks/mux/route.ts` (idempotent if both arrive).
+   fires `video.asset.live_stream_completed` and `video.asset.ready`
+   (Mux sends both for a live-originated asset; both are handled
+   identically, so it doesn't matter which lands first) → the Video row
+   becomes a completely ordinary `READY` video with its own VOD playback
+   id, thumbnail, duration, comments, tags, everything.
 
 That last point is the actual point of this design: a finished stream
 isn't a special "past broadcast" type — it's the exact same `Video`
 row, indistinguishable from an upload, appearing in search/tags/the
 feed like anything else.
 
-**Known edge case:** if a creator stops and near-instantly restarts
-within the same narrow window before `video.asset.ready` has landed
-for the previous session, the new `video.live_stream.active` could
-theoretically collide with the still-`PROCESSING` row's
-`providerAssetId` (which is `@unique`). In practice Mux's own
-reconnect window (a reconnect within it resumes the same session
-rather than firing `idle` at all) makes this rare; the webhook uses
-`upsert` so a duplicate delivery is at least harmless, but a genuine
-double-collision isn't specially handled. Worth revisiting if it ever
-actually happens.
+**Each asset event resolves to exactly one row.** A channel's live
+stream id is shared by every broadcast it ever does, so matching an
+asset event to a video needs care. `findVideoIdForAsset` in the webhook
+route checks in a fixed order and stops at the first hit: a row that
+already holds this asset's id (a redelivery, or the second of the
+ready/completed pair), then a direct upload still holding its upload
+id, then an *ended* (`PROCESSING`) broadcast still holding the shared
+live stream id. Requiring `PROCESSING` for that last case keeps a
+currently-live session from being claimed by an event for an earlier
+recording. The first version used one broad `OR` match with
+`updateMany`, which could match two rows at once and try to give both
+the same `providerAssetId` — tripping its unique constraint, returning
+a 500, and leaving the video stuck at `PROCESSING` while Mux's retries
+failed the same way. A webhook that arrives and then crashes is what
+left videos stuck in the testing that showed `500`s in the tunnel log.
 
-**Webhooks are best-effort — there's a manual fallback.** Real testing
-(against production, not just a local tunnel) showed that even with
-both `video.asset.ready` and `video.asset.live_stream_completed`
-handled, a delivery can still occasionally just not arrive. Rather
-than chasing perfect webhook reliability, any video stuck at
-`PROCESSING` shows a "Refresh status" button (to its uploader, or a
-moderator/admin) that asks Mux directly what's actually true —
-`reconcileVideoWithMux` in `src/lib/videos.ts`, via
-`findAssetIdFor` in `src/lib/mux.ts`, which walks live-stream →
+**Pages update themselves.** The watch page and the go-live page are
+server-rendered, so on their own they can't notice a stream starting or
+ending. `AutoRefresh` calls `router.refresh()` on an interval, but only
+while it's useful — on the watch page while a video is `LIVE` or
+`PROCESSING` (every 10s), on the go-live page once a stream is set up
+(every 5s) — and it skips background tabs. The LIVE badge, the "still
+processing" message and the finished video therefore appear without a
+reload. Client state (a half-typed comment, the revealed stream key)
+survives each refresh, and the live player isn't remounted while
+broadcasting because its props don't change. The two player branches on
+the watch page have distinct `key`s so a jump straight from live to
+ready still gets a fresh player. The home feed and channel page don't
+poll — their LIVE badges are as of page load.
+
+**Known edge case:** if a creator stops and near-instantly restarts
+before the previous broadcast's recording has been resolved, the
+previous session's row is still `PROCESSING` and still holding the
+shared live stream id. The new `video.live_stream.active` upserts on
+that id, so it finds the old row and does nothing — the new broadcast
+doesn't get its own LIVE row until the old one resolves. Mux's
+reconnect window (a reconnect within it resumes the same session
+rather than firing `idle` at all) makes this rare. A stuck test row
+left behind in a database can cause the same thing, so clear those
+out. Worth handling properly if it ever happens for real.
+
+**A manual fallback: "Check again".** Any video stuck at `PROCESSING`
+shows a "Check again" button (to its uploader, or a moderator/admin)
+that asks Mux directly what's actually true instead of waiting on a
+webhook — `reconcileVideoWithMux` in `src/lib/videos.ts`, via
+`findAssetIdFor` in `src/lib/mux.ts`, which walks live stream →
 `recent_asset_ids` → asset (or upload → `asset_id` → asset, for a
-stuck plain upload) rather than waiting on a notification that may
-never come.
+stuck plain upload). It refuses to link a video to an asset another
+row already holds, since a live stream's `recent_asset_ids` spans every
+broadcast it has ever done. With the webhook bug above fixed it should
+rarely be needed, but anything that depends on a notification can miss
+one (a deploy at the wrong moment, a database hiccup), and the
+alternative is editing rows by hand. The wording it shows is
+deliberately free of the video provider's name — creators don't know
+what Mux is.
 
 **Explicitly not built in this pass:** live chat, viewer count, follow
 notifications when a channel goes live, and scheduling a stream in
@@ -278,3 +306,13 @@ rewrite of every component.
    search or a dedicated search service — fine at the current catalog
    size, worth upgrading once it isn't (see `searchVideos` in
    `src/lib/videos.ts` for the swap-out point).
+3. **A video that fails processing looks like one that's still
+   processing.** A `FAILED` status falls into the same branch of the
+   watch page as `PROCESSING` and shows the same "Still processing"
+   message, with no explanation or way to retry an upload. Needs its own
+   message (and probably an admin-visible failure list).
+4. **Live badges on the home feed and channel page are as of page
+   load** — only the watch page and go-live page auto-refresh.
+5. **Live streams aren't searchable or taggable while live.** Search and
+   tag pages only list `READY` videos, and streams don't get tags at
+   go-live time; a finished stream becomes both once it's a normal video.
